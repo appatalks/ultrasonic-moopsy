@@ -4,7 +4,8 @@ import time
 import os
 
 import matplotlib
-matplotlib.use('Agg')  # headless Matplotlib backend
+# matplotlib.use('Agg')  # headless Matplotlib backend
+matplotlib.use('Qt5Agg')  # GUI Matplotlib backend
 import matplotlib.pyplot as plt
 
 from robot_hat import Ultrasonic, Pin, Music
@@ -17,7 +18,7 @@ ECHO_PIN = "D0"
 WARNING_DISTANCE = 10.0
 
 # Number of measurements per batch
-NUM_READINGS = 60
+NUM_READINGS = 90
 
 # Name/path of the sound file you want to play
 # Make sure the file is in a format supported by robot_hat (e.g. .wav, .mp3)
@@ -41,6 +42,10 @@ def gather_readings(sensor, music_obj, num_readings=NUM_READINGS):
             dist_val = max(dist, 0)
             print(f"Reading {i}: {dist_val:.2f} cm")
 
+        # Show a quick ASCII bar
+        bar_len = min(int(dist_val // 2), 50)
+        print(f"{dist_val:5.1f} cm | {'#' * bar_len}")    
+
         # If below the threshold, print a warning and play sound
         if 0 < dist_val < WARNING_DISTANCE:
             print(f"*** WARNING: Object is within {WARNING_DISTANCE} cm! ***")
@@ -48,7 +53,7 @@ def gather_readings(sensor, music_obj, num_readings=NUM_READINGS):
             music_obj.sound_play(WARNING_SOUND, volume=100)
 
         data.append((i, dist_val))
-        time.sleep(0.2)
+        time.sleep(0.3)
 
     print("Collection complete.")
     return data
@@ -77,38 +82,62 @@ def plot_data(data, round_number=1):
     print(f"Plot saved as: {filename}")
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Ultrasonic distance mapping with Robot HAT Music-based sound warnings."
-    )
-    parser.add_argument("-i", "--interactive", action="store_true",
-                        help="If set, prompt after each round. Otherwise, loop continuously.")
-    args = parser.parse_args()
-
-    # Initialize ultrasonic sensor
     sensor = Ultrasonic(Pin(TRIG_PIN), Pin(ECHO_PIN))
-    print(f"Ultrasonic sensor initialized (TRIG={TRIG_PIN}, ECHO={ECHO_PIN}).")
-
-    # Initialize Music for HAT speaker playback
     music_obj = Music()
 
-    print("Press Ctrl+C at any time to stop.\n")
-    round_number = 1
+    plt.ion()  # Turn on interactive mode
+    fig, ax = plt.subplots()
+    distances = []
+    indices = []
 
-    while True:
-        data = gather_readings(sensor, music_obj, NUM_READINGS)
-        plot_data(data, round_number)
+    line, = ax.plot([], [], marker='o', linestyle='-')
+    ax.set_ylim(0, 100)  # Set an upper bound for distance, adjust as needed
+    ax.set_xlim(0, 200)  # Set initial x-axis range
+    ax.set_xlabel("Reading Index")
+    ax.set_ylabel("Distance (cm)")
+    ax.set_title("Real-Time Ultrasonic Readings")
 
-        if args.interactive:
-            choice = input("Would you like to collect another set? (y/n): ").strip().lower()
-            if choice not in ("y", "yes"):
-                print("Exiting...")
-                break
+    i = 0
+    while True:  # Infinite loop for continuous readings
+        dist = sensor.read()
+        # dist = sensor.read() or 0
+        
+        bar_length = min(int(dist // 2), 50)  # scale down
+        print(f"Distance: {dist:>4} cm | " + "#"*bar_length)
+        time.sleep(0.3)
+
+        if dist is None:
+            dist_val = 0.0
+            # print(f"Reading {i + 1}: None")
         else:
-            print("Continuing automatically. (Ctrl+C to stop)")
-        round_number += 1
+            dist_val = dist
+            # print(f"Reading {i + 1}: {dist_val:.2f} cm")
+
+        if 0 < dist_val < WARNING_DISTANCE:
+            print("*** WARNING ***")
+            music_obj.sound_play(WARNING_SOUND, volume=100)
+
+        distances.append(dist_val)
+        indices.append(i + 1)
+        i += 1
+
+        # Sliding window: Keep only the last 200 readings (optional)
+        if len(distances) > 200:
+            distances.pop(0)
+            indices.pop(0)
+
+        # Update the plotted data
+        line.set_xdata(indices)
+        line.set_ydata(distances)
+
+        # Expand x-axis and y-axis limits dynamically if needed
+        ax.set_xlim(0, max(200, i + 10))
+        ax.set_ylim(0, max(100, dist_val + 10))
+
+        plt.draw()
+        plt.pause(0.1)  # Allow the plot to update
+
+        time.sleep(0.3)  # Reading interval
 
 if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        print("\nInterrupted by user. Exiting...")
+    main()
